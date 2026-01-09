@@ -1,0 +1,10 @@
+{
+    "name": "webjakodukaz",
+    "private": true,
+    "packageManager": "pnpm@10.27.0",
+    "scripts": {
+      "dev:api": "pnpm --filter @webjakodukaz/api dev",
+      "dev:capture": "pnpm --filter @webjakodukaz/capture dev",
+      "lint": "pnpm -r lint"
+    }
+  }  
