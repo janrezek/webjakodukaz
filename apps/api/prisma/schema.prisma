@@ -1,0 +1,63 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum EvidenceStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum ArtifactType {
+  FILE
+  DIRECTORY
+}
+
+model Evidence {
+  id           String   @id @default(uuid())
+  evidenceId   String   @unique
+  url          String
+  note         String?
+  timestamp    BigInt
+  evidenceHash String
+  status       EvidenceStatus @default(PENDING)
+  artifacts    EvidenceArtifact[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([evidenceId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("evidence")
+}
+
+model EvidenceArtifact {
+  id          String   @id @default(uuid())
+  evidenceId  String
+  evidence    Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      EvidenceArtifact? @relation("ArtifactHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    EvidenceArtifact[] @relation("ArtifactHierarchy")
+  path        String   // Full path: "images/logo.png"
+  name        String   // File name: "logo.png"
+  type        ArtifactType
+  hash        String
+  s3Key       String
+  size        BigInt
+  mimeType    String?
+  createdAt   DateTime @default(now())
+
+  @@index([evidenceId])
+  @@index([parentId])
+  @@index([evidenceId, path])
+  @@unique([evidenceId, path])
+  @@map("evidence_artifact")
+}

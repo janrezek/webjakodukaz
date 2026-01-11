@@ -5,6 +5,7 @@
     "scripts": {
       "dev:api": "pnpm --filter @webjakodukaz/api dev",
       "dev:capture": "pnpm --filter @webjakodukaz/capture dev",
+      "dev:api:test": "pnpm --filter @webjakodukaz/api test:e2e",
       "lint": "pnpm -r lint"
     }
   }  
