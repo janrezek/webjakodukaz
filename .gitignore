@@ -60,6 +60,8 @@ Thumbs.db
 # Prisma
 prisma/migrations/*.sql
 !prisma/migrations/.gitkeep
+apps/api/prisma/migrations/
+apps/api/src/generated/
 
 # Playwright
 test-results/

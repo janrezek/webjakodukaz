@@ -8,11 +8,23 @@ import { HashService } from '../common/hash.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EvidenceStatus, ArtifactType } from '@prisma/client';
 
+/**
+ * Service responsible for managing evidence capture and retrieval operations.
+ * Handles the complete workflow from capturing web pages to storing evidence
+ * with integrity hashes in the database and S3 storage.
+ */
 @Injectable()
 export class EvidenceService {
   private readonly logger = new Logger(EvidenceService.name);
   private readonly rawPrefix: string;
 
+  /**
+   * Creates an instance of EvidenceService.
+   * @param config Configuration service for accessing environment variables
+   * @param s3Service Service for S3 storage operations
+   * @param hashService Service for creating integrity hashes
+   * @param prisma Prisma service for database operations
+   */
   constructor(
     private readonly config: ConfigService,
     private readonly s3Service: S3Service,
@@ -23,6 +35,20 @@ export class EvidenceService {
     this.rawPrefix = rawPrefix.replace(/\/+$/, '');
   }
 
+  /**
+   * Captures a web page as evidence by taking a screenshot and storing it with metadata.
+   * This method performs the complete evidence capture workflow:
+   * 1. Generates a unique evidence ID
+   * 2. Captures a screenshot of the provided URL
+   * 3. Creates integrity hashes for the screenshot and evidence
+   * 4. Uploads the screenshot to S3
+   * 5. Saves evidence and artifact records to the database in a transaction
+   * 6. Generates a pre-signed download URL for the screenshot
+   *
+   * @param dto Data transfer object containing the URL to capture and optional note
+   * @returns Promise resolving to evidence response with metadata, hashes, and download URL
+   * @throws Error if screenshot capture, S3 upload, or database operation fails
+   */
   async capture(dto: CreateEvidenceDto) {
     const evidenceId = `ev_${randomUUID()}`;
     const timestamp = Date.now();
@@ -102,6 +128,13 @@ export class EvidenceService {
     };
   }
 
+  /**
+   * Retrieves a single evidence record by its evidence ID.
+   * Includes all associated artifacts with pre-signed download URLs.
+   *
+   * @param evidenceId Unique evidence identifier (format: ev_<uuid>)
+   * @returns Promise resolving to evidence details with artifacts, or null if not found
+   */
   async findOne(evidenceId: string) {
     const evidence = await this.prisma.evidence.findUnique({
       where: { evidenceId },
@@ -151,6 +184,14 @@ export class EvidenceService {
     };
   }
 
+  /**
+   * Retrieves a paginated list of all evidence records.
+   * Results are ordered by creation date (newest first).
+   *
+   * @param skip Number of records to skip (default: 0)
+   * @param take Number of records to return (default: 20)
+   * @returns Promise resolving to paginated evidence list with metadata
+   */
   async findAll(skip = 0, take = 20) {
     const [evidence, total] = await Promise.all([
       this.prisma.evidence.findMany({

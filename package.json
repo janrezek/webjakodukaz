@@ -7,5 +7,11 @@
       "dev:capture": "pnpm --filter @webjakodukaz/capture dev",
       "dev:api:test": "pnpm --filter @webjakodukaz/api test:e2e",
       "lint": "pnpm -r lint"
+    },
+    "pnpm": {
+      "overrides": {
+        "glob": "^13.0.0",
+        "validator": "13.11.0"
+      }
     }
   }  

@@ -7,6 +7,29 @@ Důraz je kladen na reprodukovatelnost, integritu dat a transparentnost postupu.
 
 > Projekt je vyvíjen jako otevřený (open-source) a slouží primárně k výzkumným, vzdělávacím a publikačním účelům.
 
+> **English version:** See [English section](#webjakodukaz-1) below.
+
+---
+
+## Obsah
+
+- [Cíle projektu](#cíle-projektu)
+- [Aktuální stav (fáze 1)](#aktuální-stav-fáze-1)
+  - [API Endpointy](#api-endpointy)
+  - [Funkcionalita](#funkcionalita)
+  - [Databázové schéma](#databázové-schéma)
+- [Scope (rozsah)](#scope-rozsah)
+- [Architektura (high-level)](#architektura-high-level)
+- [Použitý stack](#použitý-stack)
+- [Struktura repozitáře](#struktura-repozitáře)
+- [Rychlý start](#rychlí-start)
+  - [Požadavky](#požadavky)
+  - [Instalace](#instalace)
+- [Roadmap (orientační)](#roadmap-orientační)
+- [Bezpečnostní poznámky](#bezpečnostní-poznámky)
+- [Licence](#licence)
+- [Autor](#autor)
+
 ---
 
 ## Cíle projektu
@@ -34,15 +57,17 @@ Aktuálně projekt implementuje:
 - `GET /v1/evidence` - Seznam všech důkazů s paginací (`?skip=0&take=20`)
 - `GET /v1/evidence/:evidenceId` - Detail konkrétního důkazu včetně všech artifactů
 
+API server běží na `http://localhost:3001` (nebo portu specifikovaném v `PORT` environment proměnné).
+
 ### Funkcionalita
-- ✅ REST API s validací vstupů (URL, poznámky)
-- ✅ Server-side zachycení webové stránky pomocí Playwright
-- ✅ Uložení výsledných artefaktů (screenshoty) do S3
-- ✅ Generování časově omezených pre-signed URL pro stažení
-- ✅ **Ukládání metadat důkazů do databáze** (SQLite pro development)
-- ✅ **Hash integrity** - každý soubor má vlastní hash, evidence má agregovaný hash
-- ✅ **Hierarchická struktura artifactů** - podpora pro více souborů na jeden důkaz
-- ✅ **Transakční ukládání** - zajištění konzistence dat
+- REST API s validací vstupů
+- Server-side zachycení webové stránky pomocí Playwright
+- Uložení výsledných artefaktů (screenshoty) do S3
+- Generování časově omezených pre-signed URL pro stažení
+- **Ukládání metadat důkazů do databáze** (PostgreSQL)
+- **Hash integrity** - každý soubor má vlastní hash, evidence má agregovaný hash
+- **Hierarchická struktura artifactů** - podpora pro více souborů na jeden důkaz
+- **Transakční ukládání** - zajištění konzistence dat
 
 ### Databázové schéma
 - **Evidence** - hlavní záznam důkazu (URL, timestamp, hash, status)
@@ -82,7 +107,7 @@ Projekt je navržen jako **modulární monorepo**:
   Izolovaná výpočetní část pro zachycení webového obsahu (aktuálně jako knihovna, plánováno jako standalone worker).
 - **Storage (S3)**  
   Ukládání surových i finálních artefaktů (screenshoty, externí média).
-- **Database (SQLite/PostgreSQL)**  
+- **Database (PostgreSQL)**  
   Ukládání metadat důkazů, hashů a struktury artifactů.
 - **Web UI (Next.js)**  
   Uživatelské rozhraní (zatím neimplementováno).
@@ -95,7 +120,7 @@ Projekt je navržen jako **modulární monorepo**:
 - **Node.js**
 - **NestJS**
 - **TypeScript**
-- **Prisma ORM** (SQLite pro development, PostgreSQL pro produkci)
+- **Prisma ORM** (PostgreSQL)
 
 ### Capture
 - **Playwright** (Chromium)
@@ -105,8 +130,7 @@ Projekt je navržen jako **modulární monorepo**:
 - Pre-signed URLs
 
 ### Database
-- **SQLite** (development)
-- **PostgreSQL** (produkce - připraveno)
+- **PostgreSQL**
 
 ### Projektová struktura
 - **pnpm workspaces** (monorepo)
@@ -124,14 +148,19 @@ webjakodukaz/
 │  │  │  ├─ prisma/       # Prisma service a modul
 │  │  │  ├─ storage/      # S3 storage service
 │  │  │  └─ common/        # Sdílené služby (hash)
-│  │  └─ prisma/
-│  │     └─ schema.prisma # Databázové schéma
+│  │  ├─ prisma/
+│  │  │  └─ schema.prisma # Databázové schéma
+│  │  ├─ .env.example    # Template pro API .env (S3 a DATABASE_URL)
+│  │  └─ .env            # API environment proměnné (není v gitu)
 │  └─ web/            # Next.js UI (zatím prázdné)
 ├─ workers/
 │  └─ capture/        # Playwright capture logic
 ├─ packages/
 │  └─ shared/         # Sdílené typy a konstanty
-└─ docs/              # Dokumentace a návrhové poznámky
+├─ docs/              # Dokumentace a návrhové poznámky
+├─ docker-compose.yml # Docker Compose konfigurace pro PostgreSQL
+├─ .env.example       # Template pro root .env (PostgreSQL pro Docker)
+└─ .env               # Root environment proměnné (není v gitu)
 ```
 
 ---
@@ -141,8 +170,9 @@ webjakodukaz/
 ### Požadavky
 - Node.js 18+
 - pnpm 10+
+- Docker a Docker Compose (pro lokální databázi)
 - S3 kompatibilní storage (nebo AWS S3)
-- SQLite (pro development) nebo PostgreSQL (pro produkci)
+- PostgreSQL (lze spustit pomocí Docker Compose)
 
 ### Instalace
 
@@ -151,30 +181,30 @@ webjakodukaz/
 pnpm install
 
 # Nastavení environment proměnných
+# 1. Root .env (pro Docker Compose - PostgreSQL credentials)
 cp .env.example .env
-# Uprav .env soubor s tvými S3 credentials
+# Uprav .env v rootu s PostgreSQL údaji pro Docker:
+# - POSTGRES_USER
+# - POSTGRES_PASSWORD
+# - POSTGRES_DB
+# - POSTGRES_PORT
+
+# 2. API .env (pro NestJS aplikaci - S3 a DATABASE_URL)
+cp apps/api/.env.example apps/api/.env
+# Uprav apps/api/.env s údaji pro aplikaci:
+# - DATABASE_URL (connection string, např. postgresql://postgres:postgres@localhost:8001/webjakodukaz)
+# - S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_RAW_PREFIX, S3_PRESIGN_EXPIRES_SECONDS
+# - PORT (volitelné, default: 3001)
+
+# Spuštění PostgreSQL databáze pomocí Docker Compose
+docker-compose up -d db
 
 # Spuštění databázových migrací
 cd apps/api
 pnpm prisma:migrate
 
-# Spuštění API serveru
+# Spuštění API serveru (běží na http://localhost:3001)
 pnpm dev:api
-```
-
-### API použití
-
-```bash
-# Vytvoření nového důkazu
-curl -X POST http://localhost:3001/v1/capture \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "note": "Test evidence"}'
-
-# Seznam důkazů
-curl http://localhost:3001/v1/evidence?skip=0&take=20
-
-# Detail důkazu
-curl http://localhost:3001/v1/evidence/ev_<evidence-id>
 ```
 
 ---
@@ -198,7 +228,8 @@ Plánované další kroky vývoje:
 ## Bezpečnostní poznámky
 
 Repozitář je veřejný a neobsahuje žádná tajemství (credentials, klíče).  
-Všechny citlivé hodnoty jsou načítány z prostředí (`.env`, IAM role).
+Všechny citlivé hodnoty jsou načítány z prostředí (`.env` soubory, IAM role).  
+Template soubory `.env.example` jsou veřejné a obsahují pouze příklady bez skutečných credentials.
 
 Bezpečnost projektu nespoléhá na utajení kódu, ale na:
 
@@ -232,6 +263,10 @@ Slouží k experimentování s návrhem nástrojů pro zajištění digitálníc
 
 **Tool for capturing web pages as electronic evidence.**
 
+> **Česká verze:** Viz [česká sekce](#webjakodukaz) výše.
+
+---
+
 The project focuses on technical and procedural capture of web content so it can be used as electronic evidence (e.g., in legal, analytical, or academic contexts).  
 Emphasis is placed on reproducibility, data integrity, and process transparency.
 
@@ -264,15 +299,17 @@ The project currently implements:
 - `GET /v1/evidence` - List all evidence with pagination (`?skip=0&take=20`)
 - `GET /v1/evidence/:evidenceId` - Get specific evidence details including all artifacts
 
+API server runs on `http://localhost:3001` (or port specified in `PORT` environment variable).
+
 ### Functionality
-- ✅ REST API with input validation (URL, notes)
-- ✅ Server-side web page capture using Playwright
-- ✅ Storage of resulting artifacts (screenshots) to S3
-- ✅ Generation of time-limited pre-signed URLs for download
-- ✅ **Evidence metadata storage in database** (SQLite for development)
-- ✅ **Hash integrity** - each file has its own hash, evidence has aggregated hash
-- ✅ **Hierarchical artifact structure** - support for multiple files per evidence
-- ✅ **Transactional storage** - ensures data consistency
+- REST API with input validation (URL, notes)
+- Server-side web page capture using Playwright
+- Storage of resulting artifacts (screenshots) to S3
+- Generation of time-limited pre-signed URLs for download
+- **Evidence metadata storage in database** (PostgreSQL)
+- **Hash integrity** - each file has its own hash, evidence has aggregated hash
+- **Hierarchical artifact structure** - support for multiple files per evidence
+- **Transactional storage** - ensures data consistency
 
 ### Database Schema
 - **Evidence** - main evidence record (URL, timestamp, hash, status)
@@ -312,7 +349,7 @@ The project is designed as a **modular monorepo**:
   Isolated computational part for web content capture (currently as library, planned as standalone worker).
 - **Storage (S3)**  
   Storage of raw and final artifacts (screenshots, external media).
-- **Database (SQLite/PostgreSQL)**  
+- **Database (PostgreSQL)**  
   Storage of evidence metadata, hashes, and artifact structure.
 - **Web UI (Next.js)**  
   User interface (not yet implemented).
@@ -325,7 +362,7 @@ The project is designed as a **modular monorepo**:
 - **Node.js**
 - **NestJS**
 - **TypeScript**
-- **Prisma ORM** (SQLite for development, PostgreSQL for production)
+- **Prisma ORM** (PostgreSQL)
 
 ### Capture
 - **Playwright** (Chromium)
@@ -335,8 +372,7 @@ The project is designed as a **modular monorepo**:
 - Pre-signed URLs
 
 ### Database
-- **SQLite** (development)
-- **PostgreSQL** (production - ready)
+- **PostgreSQL**
 
 ### Project Structure
 - **pnpm workspaces** (monorepo)
@@ -354,14 +390,19 @@ webjakodukaz/
 │  │  │  ├─ prisma/       # Prisma service and module
 │  │  │  ├─ storage/      # S3 storage service
 │  │  │  └─ common/        # Shared services (hash)
-│  │  └─ prisma/
-│  │     └─ schema.prisma # Database schema
+│  │  ├─ prisma/
+│  │  │  └─ schema.prisma # Database schema
+│  │  ├─ .env.example    # Template for API .env (S3 and DATABASE_URL)
+│  │  └─ .env            # API environment variables (not in git)
 │  └─ web/            # Next.js UI (empty for now)
 ├─ workers/
 │  └─ capture/        # Playwright capture logic
 ├─ packages/
 │  └─ shared/         # Shared types and constants
-└─ docs/              # Documentation and design notes
+├─ docs/              # Documentation and design notes
+├─ docker-compose.yml # Docker Compose configuration for PostgreSQL
+├─ .env.example       # Template for root .env (PostgreSQL for Docker)
+└─ .env               # Root environment variables (not in git)
 ```
 
 ---
@@ -371,8 +412,9 @@ webjakodukaz/
 ### Requirements
 - Node.js 18+
 - pnpm 10+
+- Docker and Docker Compose (for local database)
 - S3 compatible storage (or AWS S3)
-- SQLite (for development) or PostgreSQL (for production)
+- PostgreSQL (can be run using Docker Compose)
 
 ### Installation
 
@@ -381,30 +423,30 @@ webjakodukaz/
 pnpm install
 
 # Setup environment variables
+# 1. Root .env (for Docker Compose - PostgreSQL credentials)
 cp .env.example .env
-# Edit .env file with your S3 credentials
+# Edit root .env with PostgreSQL credentials for Docker:
+# - POSTGRES_USER
+# - POSTGRES_PASSWORD
+# - POSTGRES_DB
+# - POSTGRES_PORT
+
+# 2. API .env (for NestJS application - S3 and DATABASE_URL)
+cp apps/api/.env.example apps/api/.env
+# Edit apps/api/.env with application credentials:
+# - DATABASE_URL (connection string, e.g. postgresql://postgres:postgres@localhost:8001/webjakodukaz)
+# - S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_RAW_PREFIX, S3_PRESIGN_EXPIRES_SECONDS
+# - PORT (optional, default: 3001)
+
+# Start PostgreSQL database using Docker Compose
+docker-compose up -d db
 
 # Run database migrations
 cd apps/api
 pnpm prisma:migrate
 
-# Start API server
+# Start API server (runs on http://localhost:3001)
 pnpm dev:api
-```
-
-### API Usage
-
-```bash
-# Create new evidence
-curl -X POST http://localhost:3001/v1/capture \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "note": "Test evidence"}'
-
-# List evidence
-curl http://localhost:3001/v1/evidence?skip=0&take=20
-
-# Get evidence details
-curl http://localhost:3001/v1/evidence/ev_<evidence-id>
 ```
 
 ---
@@ -428,7 +470,8 @@ Planned next development steps:
 ## Security Notes
 
 The repository is public and contains no secrets (credentials, keys).  
-All sensitive values are loaded from environment (`.env`, IAM roles).
+All sensitive values are loaded from environment (`.env` files, IAM roles).  
+Template files `.env.example` are public and contain only examples without actual credentials.
 
 Project security does not rely on code secrecy, but on:
 

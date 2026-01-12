@@ -7,16 +7,30 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
+/**
+ * Result of an S3 upload operation.
+ */
 export interface UploadResult {
+  /** S3 object key (path) */
   key: string;
+  /** S3 bucket name */
   bucket: string;
 }
 
+/**
+ * Result of a pre-signed URL generation operation.
+ */
 export interface PresignedUrlResult {
+  /** Pre-signed URL for downloading the file */
   url: string;
+  /** Expiration time in seconds */
   expiresInSeconds: number;
 }
 
+/**
+ * Service for managing S3 storage operations.
+ * Handles file uploads and generation of pre-signed URLs for secure file access.
+ */
 @Injectable()
 export class S3Service {
   private readonly s3: S3Client;
@@ -25,6 +39,11 @@ export class S3Service {
   private readonly bucket: string;
   private readonly expires: number;
 
+  /**
+   * Creates an instance of S3Service.
+   * Initializes S3 client with credentials from environment variables.
+   * @param config Configuration service for accessing environment variables
+   */
   constructor(private readonly config: ConfigService) {
     const region = this.config.get<string>('S3_REGION')!;
     const accessKeyId = this.config.get<string>('S3_ACCESS_KEY_ID')!;
@@ -97,7 +116,8 @@ export class S3Service {
   }
 
   /**
-   * Gets the configured S3 bucket name
+   * Gets the configured S3 bucket name.
+   * @returns The S3 bucket name configured for this service
    */
   getBucket(): string {
     return this.bucket;

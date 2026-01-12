@@ -2,6 +2,17 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
+/**
+ * Bootstrap function that initializes and starts the NestJS application.
+ * Configures global validation pipes and starts the HTTP server.
+ * 
+ * Global validation pipe configuration:
+ * - whitelist: Strips properties that don't have decorators
+ * - forbidNonWhitelisted: Throws error if non-whitelisted properties are present
+ * - transform: Automatically transforms payloads to DTO instances
+ * 
+ * @throws Error if application fails to start
+ */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
