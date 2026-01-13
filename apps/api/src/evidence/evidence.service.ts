@@ -2,11 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { randomUUID } from 'crypto';
-import { captureScreenshot } from '@webjakodukaz/capture';
+import { capturePage } from '@webjakodukaz/capture';
 import { S3Service } from '../storage/s3.service';
 import { HashService } from '../common/hash.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EvidenceStatus, ArtifactType } from '@prisma/client';
+import archiver from 'archiver';
 
 /**
  * Service responsible for managing evidence capture and retrieval operations.
@@ -36,104 +37,224 @@ export class EvidenceService {
   }
 
   /**
-   * Captures a web page as evidence by taking a screenshot and storing it with metadata.
-   * This method performs the complete evidence capture workflow:
-   * 1. Generates a unique evidence ID
-   * 2. Captures a screenshot of the provided URL
-   * 3. Creates integrity hashes for the screenshot and evidence
-   * 4. Uploads the screenshot to S3
-   * 5. Saves evidence and artifact records to the database in a transaction
-   * 6. Generates a pre-signed download URL for the screenshot
-   *
-   * @param dto Data transfer object containing the URL to capture and optional note
-   * @returns Promise resolving to evidence response with metadata, hashes, and download URL
-   * @throws Error if screenshot capture, S3 upload, or database operation fails
+   * Captures a web page as evidence by taking a screenshot, HTML content and storing it in a ZIP package.
+   * The ZIP is the source of truth and contains all files plus a manifest.json.
+   * @param dto Data transfer object containing the URL to capture
+   * @returns Promise resolving to evidence response with metadata, hashes, and ZIP download URL
+   * @throws Error if page capture, ZIP creation, S3 upload, or database operation fails
    */
   async capture(dto: CreateEvidenceDto) {
     const evidenceId = `ev_${randomUUID()}`;
     const timestamp = Date.now();
 
-    // 1) Capture screenshot
-    this.logger.debug(`Capturing screenshot for URL: ${dto.url}`);
-    const png = await captureScreenshot(dto.url);
+    this.logger.debug(`Capturing page for URL: ${dto.url}`);
+    const { screenshot, html, metadata } = await capturePage(dto.url);
 
-    // 2) Create hash of the screenshot for integrity verification
-    const screenshotHash = this.hashService.createHash(png);
+    const screenshotHash = metadata.screenshotHash;
+    const htmlHash = metadata.htmlHash;
     this.logger.debug(`Screenshot hash: ${screenshotHash}`);
+    this.logger.debug(`HTML hash: ${htmlHash}`);
 
-    // 3) Upload to S3
-    const key = `${this.rawPrefix}/${evidenceId}/screenshot-full.png`;
-    await this.s3Service.upload(key, png, 'image/png');
+    const contentFiles = [
+      {
+        path: 'screenshot-full.png',
+        name: 'screenshot-full.png',
+        hash: screenshotHash,
+        size: screenshot.length,
+        mimeType: 'image/png',
+      },
+      {
+        path: 'page.html',
+        name: 'page.html',
+        hash: htmlHash,
+        size: Buffer.byteLength(html, 'utf-8'),
+        mimeType: 'text/html',
+      },
+    ];
 
-    // 4) Create evidence hash (integrity hash combining all evidence data)
-    const evidenceHash = this.hashService.createEvidenceHash(
+    const metadataJson = JSON.stringify(
+      {
+        ...metadata,
       evidenceId,
-      dto.url,
-      screenshotHash,
-      timestamp,
+      },
+      null,
+      2,
     );
-    this.logger.debug(`Evidence hash: ${evidenceHash}`);
+    const metadataHash = this.hashService.createHash(metadataJson);
+    const metadataSize = Buffer.byteLength(metadataJson, 'utf-8');
 
-    // 5) Save to database in transaction
+    const manifestFiles = [
+      ...contentFiles,
+      {
+        path: 'metadata.json',
+        name: 'metadata.json',
+        hash: metadataHash,
+        size: metadataSize,
+        mimeType: 'application/json',
+      },
+    ];
+    const manifestJson = JSON.stringify(
+      {
+        files: manifestFiles.map((f) => ({
+          path: f.path,
+          name: f.name,
+          hash: f.hash,
+          size: f.size,
+          mimeType: f.mimeType,
+        })),
+      },
+      null,
+      2,
+    );
+    const manifestHash = this.hashService.createHash(manifestJson);
+    const manifestSize = Buffer.byteLength(manifestJson, 'utf-8');
+
+    const zipBuffer = await this.createZipPackage({
+      screenshot,
+      html,
+      metadata: metadataJson,
+      manifest: manifestJson,
+    });
+
+    const zipHash = this.hashService.createHash(zipBuffer);
+    const zipSize = zipBuffer.length;
+    this.logger.debug(`ZIP hash: ${zipHash}`);
+    this.logger.debug(`ZIP size: ${zipSize} bytes`);
+
+    const zipKey = `${this.rawPrefix}/${evidenceId}/package.zip`;
+    await this.s3Service.upload(zipKey, zipBuffer, 'application/zip');
+
     const evidence = await this.prisma.$transaction(async (tx) => {
-      // Create evidence record
       const evidenceRecord = await tx.evidence.create({
         data: {
           evidenceId,
           url: dto.url,
-          note: dto.note ?? null,
           timestamp: BigInt(timestamp),
-          evidenceHash,
+          zipS3Key: zipKey,
+          zipHash,
+          zipSize: BigInt(zipSize),
           status: EvidenceStatus.DONE,
         },
       });
 
-      // Create artifact record for screenshot
-      await tx.evidenceArtifact.create({
+      const artifactPromises = contentFiles.map((file) =>
+        tx.evidenceArtifact.create({
+          data: {
+            evidenceId: evidenceRecord.id,
+            path: file.path,
+            name: file.name,
+            type: ArtifactType.FILE,
+            hash: file.hash,
+            size: BigInt(file.size),
+            mimeType: file.mimeType,
+          },
+        }),
+      );
+
+      artifactPromises.push(
+        tx.evidenceArtifact.create({
+          data: {
+            evidenceId: evidenceRecord.id,
+            path: 'metadata.json',
+            name: 'metadata.json',
+            type: ArtifactType.FILE,
+            hash: metadataHash,
+            size: BigInt(metadataSize),
+            mimeType: 'application/json',
+          },
+        }),
+      );
+
+      artifactPromises.push(
+        tx.evidenceArtifact.create({
         data: {
           evidenceId: evidenceRecord.id,
-          path: 'screenshot-full.png',
-          name: 'screenshot-full.png',
+            path: 'manifest.json',
+            name: 'manifest.json',
           type: ArtifactType.FILE,
-          hash: screenshotHash,
-          s3Key: key,
-          size: BigInt(png.length),
-          mimeType: 'image/png',
+            hash: manifestHash,
+            size: BigInt(manifestSize),
+            mimeType: 'application/json',
         },
-      });
+        }),
+      );
+
+      await Promise.all(artifactPromises);
 
       return evidenceRecord;
     });
 
-    // 6) Generate pre-signed download URL
     const { url: downloadUrl, expiresInSeconds } =
-      await this.s3Service.getPresignedUrl(key);
+      await this.s3Service.getPresignedUrl(zipKey);
 
     return {
       evidenceId: evidence.evidenceId,
       status: evidence.status,
       url: evidence.url,
-      note: evidence.note,
       timestamp: Number(evidence.timestamp),
       hash: {
         screenshot: screenshotHash,
-        evidence: evidence.evidenceHash,
+        html: htmlHash,
+        zip: zipHash,
       },
-      artifact: {
-        type: 'SCREENSHOT_FULL',
-        key,
+      package: {
+        key: zipKey,
         downloadUrl,
         expiresInSeconds,
+        size: zipSize,
       },
     };
   }
 
   /**
+   * Creates a ZIP package containing all evidence files, metadata.json, and manifest.json.
+   * Manifest.json is added last and contains hashes of all other files (including metadata.json).
+   */
+  private async createZipPackage({
+    screenshot,
+    html,
+    metadata,
+    manifest,
+  }: {
+    screenshot: Buffer;
+    html: string;
+    metadata: string;
+    manifest: string;
+  }): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const archive = archiver('zip', {
+        zlib: { level: 9 },
+      });
+
+      const chunks: Buffer[] = [];
+
+      archive.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+
+      archive.on('end', () => {
+        resolve(Buffer.concat(chunks));
+      });
+
+      archive.on('error', (err) => {
+        reject(err);
+      });
+
+      archive.append(screenshot, { name: 'screenshot-full.png' });
+      archive.append(html, { name: 'page.html' });
+      archive.append(metadata, { name: 'metadata.json' });
+      archive.append(manifest, { name: 'manifest.json' });
+
+      archive.finalize();
+    });
+  }
+
+  /**
    * Retrieves a single evidence record by its evidence ID.
-   * Includes all associated artifacts with pre-signed download URLs.
+   * Includes all associated artifacts and ZIP package information.
    *
    * @param evidenceId Unique evidence identifier (format: ev_<uuid>)
-   * @returns Promise resolving to evidence details with artifacts, or null if not found
+   * @returns Promise resolving to evidence details with artifacts and ZIP info, or null if not found
    */
   async findOne(evidenceId: string) {
     const evidence = await this.prisma.evidence.findUnique({
@@ -149,36 +270,32 @@ export class EvidenceService {
       return null;
     }
 
-    // Generate pre-signed URLs for artifacts
-    const artifactsWithUrls = await Promise.all(
-      evidence.artifacts.map(async (artifact) => {
-        const { url: downloadUrl, expiresInSeconds } =
-          await this.s3Service.getPresignedUrl(artifact.s3Key);
-
-        return {
-          id: artifact.id,
-          path: artifact.path,
-          name: artifact.name,
-          type: artifact.type,
-          hash: artifact.hash,
-          size: Number(artifact.size),
-          mimeType: artifact.mimeType,
-          downloadUrl,
-          expiresInSeconds,
-        };
-      }),
-    );
+    const { url: zipDownloadUrl, expiresInSeconds } =
+      await this.s3Service.getPresignedUrl(evidence.zipS3Key);
 
     return {
       evidenceId: evidence.evidenceId,
       status: evidence.status,
       url: evidence.url,
-      note: evidence.note,
       timestamp: Number(evidence.timestamp),
       hash: {
-        evidence: evidence.evidenceHash,
+        zip: evidence.zipHash,
       },
-      artifacts: artifactsWithUrls,
+      package: {
+        key: evidence.zipS3Key,
+        downloadUrl: zipDownloadUrl,
+        expiresInSeconds,
+        size: Number(evidence.zipSize),
+      },
+      artifacts: evidence.artifacts.map((artifact) => ({
+        id: artifact.id,
+        path: artifact.path,
+        name: artifact.name,
+        type: artifact.type,
+        hash: artifact.hash,
+        size: Number(artifact.size),
+        mimeType: artifact.mimeType,
+      })),
       createdAt: evidence.createdAt.toISOString(),
       updatedAt: evidence.updatedAt.toISOString(),
     };
@@ -202,9 +319,7 @@ export class EvidenceService {
           id: true,
           evidenceId: true,
           url: true,
-          note: true,
           timestamp: true,
-          evidenceHash: true,
           status: true,
           createdAt: true,
           updatedAt: true,
@@ -220,7 +335,6 @@ export class EvidenceService {
       data: evidence.map((e) => ({
         evidenceId: e.evidenceId,
         url: e.url,
-        note: e.note,
         timestamp: Number(e.timestamp),
         status: e.status,
         artifactCount: e._count.artifacts,
@@ -234,4 +348,5 @@ export class EvidenceService {
       },
     };
   }
+
 }

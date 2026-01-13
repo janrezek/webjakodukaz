@@ -62,20 +62,30 @@ API server běží na `http://localhost:3001` (nebo portu specifikovaném v `POR
 ### Funkcionalita
 - REST API s validací vstupů
 - Server-side zachycení webové stránky pomocí Playwright
-- Uložení výsledných artefaktů (screenshoty) do S3
-- Generování časově omezených pre-signed URL pro stažení
+- **Důkazní balíček jako ZIP** - vytvoření a uložení ZIP souboru na S3 (source of truth)
+- Generování časově omezených pre-signed URL pro stažení ZIP balíčku
 - **Ukládání metadat důkazů do databáze** (PostgreSQL)
-- **Hash integrity** - každý soubor má vlastní hash, evidence má agregovaný hash
-- **Hierarchická struktura artifactů** - podpora pro více souborů na jeden důkaz
+- **Hash integrity** - každý soubor má vlastní hash, ZIP má hash pro ověření integrity
+- **Manifest souborů** - manifest.json obsahuje seznam všech souborů v ZIPu s hashy
+- **Metadata capture** - ukládání metadat o capture (URL, timestamp, user-agent, viewport, title)
 - **Transakční ukládání** - zajištění konzistence dat
 
+### Struktura důkazního balíčku (ZIP)
+ZIP soubor obsahuje:
+- `screenshot-full.png` - full-page screenshot stránky
+- `page.html` - HTML kód zachycené stránky
+- `metadata.json` - metadata o capture procesu (URL, timestamp, user-agent, viewport, title, finalUrl)
+- `manifest.json` - seznam všech souborů v balíčku včetně jejich hashů, velikostí a MIME typů
+
+ZIP je **source of truth** - všechny soubory jsou uloženy pouze v ZIPu na S3. Jednotlivé soubory jsou evidovány v databázi jako artifacty pro referenci, ale fyzicky existují pouze v ZIP balíčku.
+
 ### Databázové schéma
-- **Evidence** - hlavní záznam důkazu (URL, timestamp, hash, status)
-- **EvidenceArtifact** - jednotlivé soubory/artefakty s hierarchickou strukturou
+- **Evidence** - hlavní záznam důkazu (URL, timestamp, zipS3Key, zipHash, zipSize, status)
+- **EvidenceArtifact** - jednotlivé soubory/artefakty v ZIPu (path, hash, size, mimeType)
 
 Cílem této fáze je ověřit **technickou proveditelnost** end-to-end toku:
 
-HTTP request → capture → uložení do DB + S3 → download artefaktu
+HTTP request → capture → vytvoření ZIP → uložení ZIP na S3 + metadata do DB → download ZIP balíčku
 
 ---
 
@@ -106,9 +116,9 @@ Projekt je navržen jako **modulární monorepo**:
 - **Capture worker (Playwright)**  
   Izolovaná výpočetní část pro zachycení webového obsahu (aktuálně jako knihovna, plánováno jako standalone worker).
 - **Storage (S3)**  
-  Ukládání surových i finálních artefaktů (screenshoty, externí média).
+  Ukládání důkazních balíčků jako ZIP souborů. ZIP je source of truth a obsahuje všechny artefakty (screenshot, HTML, metadata.json, manifest.json).
 - **Database (PostgreSQL)**  
-  Ukládání metadat důkazů, hashů a struktury artifactů.
+  Ukládání metadat důkazů, ZIP hashů a struktury artifactů v balíčku.
 - **Web UI (Next.js)**  
   Uživatelské rozhraní (zatím neimplementováno).
 
@@ -213,13 +223,11 @@ pnpm dev:api
 
 Plánované další kroky vývoje:
 
-- **Metadata capture** - ukládání metadat (HTTP headers, timestamp, user-agent)
-- **Důkazní balíček** - export jako ZIP s manifestem
-- **Hashování a kontrola integrity** - rozšíření současného hash systému
 - **Message queue** - oddělení workerů pomocí RabbitMQ
 - **Frontend** - Next.js webové rozhraní
 - **Chrome extension** - client-side capture možnost
 - **Podpis a časové razítko** - RFC 3161 časové razítko
+- **Rozšíření metadat** - HTTP headers, network requests, další technické detaily
 
 > **Poznámka:** Roadmapa není závazná a může se měnit v průběhu vývoje.
 
@@ -302,22 +310,32 @@ The project currently implements:
 API server runs on `http://localhost:3001` (or port specified in `PORT` environment variable).
 
 ### Functionality
-- REST API with input validation (URL, notes)
+- REST API with input validation (URL)
 - Server-side web page capture using Playwright
-- Storage of resulting artifacts (screenshots) to S3
-- Generation of time-limited pre-signed URLs for download
+- **Evidence package as ZIP** - creation and storage of ZIP file on S3 (source of truth)
+- Generation of time-limited pre-signed URLs for downloading ZIP package
 - **Evidence metadata storage in database** (PostgreSQL)
-- **Hash integrity** - each file has its own hash, evidence has aggregated hash
-- **Hierarchical artifact structure** - support for multiple files per evidence
+- **Hash integrity** - each file has its own hash, ZIP has hash for integrity verification
+- **File manifest** - manifest.json contains list of all files in ZIP with hashes
+- **Metadata capture** - storing capture metadata (URL, timestamp, user-agent, viewport, title)
 - **Transactional storage** - ensures data consistency
 
+### Evidence Package Structure (ZIP)
+ZIP file contains:
+- `screenshot-full.png` - full-page screenshot of the page
+- `page.html` - HTML code of captured page
+- `metadata.json` - metadata about capture process (URL, timestamp, user-agent, viewport, title, finalUrl)
+- `manifest.json` - list of all files in package including their hashes, sizes and MIME types
+
+ZIP is **source of truth** - all files are stored only in ZIP on S3. Individual files are recorded in database as artifacts for reference, but physically exist only in ZIP package.
+
 ### Database Schema
-- **Evidence** - main evidence record (URL, timestamp, hash, status)
-- **EvidenceArtifact** - individual files/artifacts with hierarchical structure
+- **Evidence** - main evidence record (URL, timestamp, zipS3Key, zipHash, zipSize, status)
+- **EvidenceArtifact** - individual files/artifacts in ZIP (path, hash, size, mimeType)
 
 The goal of this phase is to verify **technical feasibility** of the end-to-end flow:
 
-HTTP request → capture → storage to DB + S3 → download artifact
+HTTP request → capture → ZIP creation → ZIP storage to S3 + metadata to DB → download ZIP package
 
 ---
 
@@ -348,9 +366,9 @@ The project is designed as a **modular monorepo**:
 - **Capture worker (Playwright)**  
   Isolated computational part for web content capture (currently as library, planned as standalone worker).
 - **Storage (S3)**  
-  Storage of raw and final artifacts (screenshots, external media).
+  Storage of evidence packages as ZIP files. ZIP is source of truth and contains all artifacts (screenshot, HTML, metadata.json, manifest.json).
 - **Database (PostgreSQL)**  
-  Storage of evidence metadata, hashes, and artifact structure.
+  Storage of evidence metadata, ZIP hashes, and artifact structure in package.
 - **Web UI (Next.js)**  
   User interface (not yet implemented).
 
@@ -455,13 +473,11 @@ pnpm dev:api
 
 Planned next development steps:
 
-- **Metadata capture** - storing metadata (HTTP headers, timestamp, user-agent)
-- **Evidence package** - export as ZIP with manifest
-- **Hashing and integrity verification** - extension of current hash system
 - **Message queue** - separation of workers using RabbitMQ
 - **Frontend** - Next.js web interface
 - **Chrome extension** - client-side capture option
 - **Signature and timestamp** - RFC 3161 timestamping
+- **Extended metadata** - HTTP headers, network requests, additional technical details
 
 > **Note:** The roadmap is not binding and may change during development.
 

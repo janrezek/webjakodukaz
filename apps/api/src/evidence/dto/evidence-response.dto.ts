@@ -33,8 +33,6 @@ export interface EvidenceResponseDto {
   status: 'DONE';
   /** URL that was captured */
   url: string;
-  /** Optional note provided during capture */
-  note: string | null;
   /** Timestamp when the evidence was captured (Unix timestamp in milliseconds) */
   timestamp: number;
   /** Integrity hashes for verification */

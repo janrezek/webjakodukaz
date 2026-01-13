@@ -14,28 +14,4 @@ export class HashService {
     return hash.digest('hex');
   }
 
-  /**
-   * Creates a hash for evidence integrity verification
-   * This combines multiple pieces of evidence data to create a unique hash
-   * @param evidenceId Unique evidence identifier
-   * @param url The captured URL
-   * @param screenshotHash SHA-256 hash of the screenshot
-   * @param timestamp Optional timestamp (defaults to current time)
-   * @returns Hexadecimal hash string
-   */
-  createEvidenceHash(
-    evidenceId: string,
-    url: string,
-    screenshotHash: string,
-    timestamp?: number,
-  ): string {
-    const data = JSON.stringify({
-      evidenceId,
-      url,
-      screenshotHash,
-      timestamp: timestamp ?? Date.now(),
-    });
-
-    return this.createHash(data);
-  }
 }

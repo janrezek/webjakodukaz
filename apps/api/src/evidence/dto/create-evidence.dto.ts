@@ -1,4 +1,4 @@
-import { IsUrl, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsUrl } from 'class-validator';
 
 /**
  * Data transfer object for creating new evidence.
@@ -11,13 +11,4 @@ export class CreateEvidenceDto {
    */
   @IsUrl({ require_protocol: true })
   url!: string;
-
-  /**
-   * Optional note or description for the evidence.
-   * Maximum length: 500 characters.
-   */
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  note?: string;
 }

@@ -25,9 +25,10 @@ model Evidence {
   id           String   @id @default(uuid())
   evidenceId   String   @unique
   url          String
-  note         String?
   timestamp    BigInt
-  evidenceHash String
+  zipS3Key     String   // S3 key for the ZIP package
+  zipHash      String   // SHA-256 hash of the ZIP file
+  zipSize      BigInt   // Size of the ZIP file in bytes
   status       EvidenceStatus @default(PENDING)
   artifacts    EvidenceArtifact[]
   createdAt    DateTime @default(now())
@@ -46,13 +47,12 @@ model EvidenceArtifact {
   parentId    String?
   parent      EvidenceArtifact? @relation("ArtifactHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children    EvidenceArtifact[] @relation("ArtifactHierarchy")
-  path        String   // Full path: "images/logo.png"
-  name        String   // File name: "logo.png"
+  path        String   // Full path within ZIP: "screenshot-full.png"
+  name        String   // File name: "screenshot-full.png"
   type        ArtifactType
-  hash        String
-  s3Key       String
-  size        BigInt
-  mimeType    String?
+  hash        String   // SHA-256 hash of the file (for verification against ZIP manifest)
+  size        BigInt   // Size of the file in bytes
+  mimeType    String?  // MIME type of the file
   createdAt   DateTime @default(now())
 
   @@index([evidenceId])

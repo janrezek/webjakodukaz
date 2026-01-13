@@ -116,6 +116,34 @@ export class S3Service {
   }
 
   /**
+   * Downloads a file from S3
+   * @param key S3 object key
+   * @returns File content as Buffer
+   */
+  async download(key: string): Promise<Buffer> {
+    const response = await this.s3.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }),
+    );
+
+    if (!response.Body) {
+      throw new Error(`Failed to download file from S3: ${key}`);
+    }
+
+    // Convert stream to buffer
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.Body as any) {
+      chunks.push(Buffer.from(chunk));
+    }
+
+    this.logger.debug(`Downloaded file from S3: ${key}`);
+
+    return Buffer.concat(chunks);
+  }
+
+  /**
    * Gets the configured S3 bucket name.
    * @returns The S3 bucket name configured for this service
    */

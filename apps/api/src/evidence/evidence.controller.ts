@@ -24,7 +24,7 @@ export class EvidenceController {
 
   /**
    * Endpoint for capturing a web page as evidence.
-   * @param dto Data transfer object containing URL and optional note
+   * @param dto Data transfer object containing URL
    * @returns Evidence response with metadata, hashes, and download URL
    */
   @Post('capture')
